@@ -30,27 +30,27 @@ import static com.google.common.base.Preconditions.checkState;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableTable;
 import com.google.common.collect.Lists;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
 import com.google.common.reflect.TypeToken;
 import ninja.leaping.configurate.objectmapping.serialize.TypeSerializers;
-import org.spongepowered.api.data.DataContainer;
-import org.spongepowered.api.data.DataManager;
-import org.spongepowered.api.data.DataSerializable;
-import org.spongepowered.api.data.DataView;
-import org.spongepowered.api.data.ImmutableDataBuilder;
-import org.spongepowered.api.data.ImmutableDataHolder;
+import org.spongepowered.api.Sponge;
+import org.spongepowered.api.data.*;
 import org.spongepowered.api.data.key.Key;
 import org.spongepowered.api.data.manipulator.DataManipulator;
 import org.spongepowered.api.data.manipulator.DataManipulatorBuilder;
 import org.spongepowered.api.data.manipulator.ImmutableDataManipulator;
+import org.spongepowered.api.data.merge.MergeFunction;
 import org.spongepowered.api.data.persistence.AbstractDataBuilder;
 import org.spongepowered.api.data.persistence.DataBuilder;
 import org.spongepowered.api.data.persistence.DataContentUpdater;
 import org.spongepowered.api.data.persistence.DataTranslator;
 import org.spongepowered.api.data.value.BaseValue;
+import org.spongepowered.api.event.data.ChangeDataHolderEvent;
+import org.spongepowered.api.util.Tuple;
 import org.spongepowered.common.SpongeImpl;
 import org.spongepowered.common.config.DataSerializableTypeSerializer;
 import org.spongepowered.common.data.builder.manipulator.SpongeDataManipulatorBuilder;
@@ -68,17 +68,15 @@ import org.spongepowered.common.data.util.ComparatorUtil;
 import org.spongepowered.common.data.util.DataFunction;
 import org.spongepowered.common.data.util.DataProcessorDelegate;
 import org.spongepowered.common.data.util.ValueProcessorDelegate;
+import org.spongepowered.common.interfaces.data.IMixinCustomDataHolder;
 import org.spongepowered.common.registry.type.data.DataTranslatorRegistryModule;
 
 import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
+
+import javax.annotation.Nullable;
 
 public final class SpongeDataManager implements DataManager {
     static {
@@ -86,6 +84,7 @@ public final class SpongeDataManager implements DataManager {
     }
 
     private static final SpongeDataManager instance = new SpongeDataManager();
+    private final Map<Key, Class<? extends DataManipulator<?, ?>>> keys = Maps.newHashMap();
     private final Map<Class<?>, DataBuilder<?>> builders = Maps.newHashMap();
     private final Map<Class<? extends ImmutableDataHolder<?>>, ImmutableDataBuilder<?, ?>> immutableDataBuilderMap = new MapMaker().concurrencyLevel(4).makeMap();
 
@@ -128,6 +127,10 @@ public final class SpongeDataManager implements DataManager {
 
     // Content updaters
     private final Map<Class<? extends DataSerializable>, List<DataContentUpdater>> updatersMap = new IdentityHashMap<>();
+
+    // ChangeDataEvent
+    private final ThreadLocal<Map<Tuple<DataHolder, Class<? extends ImmutableDataManipulator<?, ?>>>, ChangeDataHolderEvent<?, ?>>>
+            changeEvents = ThreadLocal.withInitial(HashMap::new);
 
     private static boolean allowRegistrations = true;
     public static SpongeDataManager getInstance() {
@@ -275,6 +278,13 @@ public final class SpongeDataManager implements DataManager {
                 DataFunction<DataContainer, DataManipulator, Optional<? extends DataManipulator<?, ?>>> function =
                         (dataContainer, dataManipulator) -> ((DataProcessor) entry.getValue()).fill(dataContainer, dataManipulator);
                 SpongeDataManipulatorBuilder builder = new SpongeDataManipulatorBuilder(entry.getValue(), clazz, function);
+                for (Object key : builder.create().getKeys()) {
+                    if (registry.keys.containsKey(key)) {
+                        throw new IllegalArgumentException("Key " + key + " is already registered to "
+                                + registry.keys.get(key) + " and cannot be registered to " + entry.getKey() + "!");
+                    }
+                    registry.keys.put((Key) key, entry.getKey());
+                }
                 registry.builderMap.put(entry.getKey(), checkNotNull(builder));
                 serializationService.registerBuilder(entry.getKey(), builder);
             }
@@ -314,6 +324,16 @@ public final class SpongeDataManager implements DataManager {
             Class<? extends I> immutableManipulatorClass, DataManipulatorBuilder<T, I> builder) {
         checkState(allowRegistrations, "Registrations are no longer allowed!");
         if (!this.builderMap.containsKey(checkNotNull(manipulatorClass))) {
+            Set<Key<?>> keys = builder.create().getKeys();
+            for (Key<?> key : keys) {
+                if (this.keys.containsKey(key)) {
+                    throw new IllegalArgumentException("Key " + key + " is already registered to " + this.keys.get(key)
+                            + " and cannot be registered to " + manipulatorClass + "!");
+                }
+            }
+            for (Key<?> key : keys) {
+                this.keys.put(key, manipulatorClass);
+            }
             this.builderMap.put(manipulatorClass, checkNotNull(builder));
             this.immutableBuilderMap.put(checkNotNull(immutableManipulatorClass), builder);
             SpongeDataManager.getInstance().registerBuilder((Class<T>) manipulatorClass, builder);
@@ -357,6 +377,12 @@ public final class SpongeDataManager implements DataManager {
     @Override
     public <T> Optional<DataTranslator<T>> getTranslator(Class<T> objectclass) {
         return Optional.ofNullable((DataTranslator<T>) this.dataSerializerMap.get(checkNotNull(objectclass, "Target class cannot be null!")));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public <M extends DataManipulator<M, I>, I extends ImmutableDataManipulator<I, M>> Optional<Class<M>> getManipulatorClass(Key<?> key) {
+        return Optional.ofNullable((Class<M>) keys.get(key));
     }
 
     public Optional<DataManipulatorBuilder<?, ?>> getWildManipulatorBuilder(Class<? extends DataManipulator<?, ?>> manipulatorClass) {
@@ -543,6 +569,80 @@ public final class SpongeDataManager implements DataManager {
 
     public Collection<NbtValueProcessor<?, ?>> getNbtValueProcessors(NbtDataType type) {
         return this.nbtValueTable.column(type).values();
+    }
+
+    public <M extends DataManipulator<?, ?>> DataTransactionResult offer(DataHolder dataHolder,
+            @Nullable M original, M replace, MergeFunction merge, Function<Optional<M>, DataTransactionResult> applicator) {
+        return update(dataHolder, replace.asImmutable(), original == null ? null : original.asImmutable(), replace.asImmutable(),
+                applicator.compose(o -> o.map(i -> (M) i.asMutable())));
+    }
+
+    public <M extends DataManipulator<M, I>, I extends ImmutableDataManipulator<I, M>> DataTransactionResult remove(DataHolder dataHolder,
+            Class<M> manipulatorClass, Function<Optional<M>, DataTransactionResult> applicator) {
+        Optional<M> manipulator = dataHolder.get(manipulatorClass);
+        if (!manipulator.isPresent()) {
+            return DataTransactionResult.failNoData();
+        }
+        I immutable = manipulator.get().asImmutable();
+        return update(dataHolder, immutable, immutable, null, applicator.compose(o -> o.map(ImmutableDataManipulator::asMutable)));
+    }
+
+    public <M extends DataManipulator<M, I>, I extends ImmutableDataManipulator<I, M>, E> DataTransactionResult offer(DataHolder dataHolder,
+            Key<? extends BaseValue<E>> key, E value) {
+        Optional<Class<M>> manipulatorClass = getManipulatorClass(key);
+        if (!manipulatorClass.isPresent()) {
+            return DataTransactionResult.failNoData();
+        }
+        Optional<M> manipulator = dataHolder.getOrCreate(manipulatorClass.get());
+        if (!manipulator.isPresent()) {
+            return DataTransactionResult.failNoData();
+        }
+        manipulator.get().set(key, value);
+        return dataHolder.offer(manipulator.get());
+    }
+
+    public <M extends DataManipulator<M, I>, I extends ImmutableDataManipulator<I, M>> DataTransactionResult remove(DataHolder dataHolder,
+            Key<? extends BaseValue<?>> key) {
+        Optional<Class<M>> manipulatorClass = getManipulatorClass(key);
+        if (!manipulatorClass.isPresent()) {
+            return DataTransactionResult.failNoData();
+        }
+        return dataHolder.remove(manipulatorClass.get());
+    }
+
+    @SuppressWarnings("unchecked")
+    private <M extends DataManipulator<M, I>, I extends ImmutableDataManipulator<I, M>> DataTransactionResult update(DataHolder dataHolder,
+            I either, @Nullable I original, @Nullable I replace, Function<Optional<I>, DataTransactionResult> applicator) {
+        if (Objects.equals(original, replace)) {
+            return DataTransactionResult.failResult(replace == null ? ImmutableSet.of() : replace.getValues());
+        }
+
+        Map<Tuple<DataHolder, Class<? extends ImmutableDataManipulator<?, ?>>>, ChangeDataHolderEvent<?, ?>> map = changeEvents.get();
+        @SuppressWarnings("unchecked")
+        Tuple<DataHolder, Class<? extends ImmutableDataManipulator<?, ?>>> key = new Tuple<>(dataHolder, (Class) either.getClass());
+        if (map.containsKey(key)) {
+            if (map.get(key) == null) {
+                // Finalizing the operation. Don't interfere.
+                return applicator.apply(Optional.ofNullable(replace));
+            }
+            // Recursive event...? Try to protect the plugins.
+            ((ChangeDataHolderEvent<M, I>) map.get(key)).setModifiedData(replace);
+            return DataTransactionResult.successReplaceResult(original == null ? ImmutableSet.of() : original.getValues(), replace == null ?
+                    ImmutableSet.of() : replace.getValues());
+        }
+        ChangeDataHolderEvent<M, I> event = either.createChangeDataHolderEvent(dataHolder, original, replace);
+        map.put(key, event);
+        try {
+            Sponge.getEventManager().post(event);
+            replace = event.getModifiedData().orElse(null);
+            if (Objects.equals(original, replace)) {
+                return DataTransactionResult.failResult(replace == null ? ImmutableSet.of() : replace.getValues());
+            }
+            map.put(key, null);
+            return applicator.apply(Optional.ofNullable(replace));
+        } finally {
+            map.remove(key);
+        }
     }
 
     public static boolean areRegistrationsComplete() {
