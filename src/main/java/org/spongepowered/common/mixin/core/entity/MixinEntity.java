@@ -120,6 +120,7 @@ import org.spongepowered.common.event.SpongeCommonEventFactory;
 import org.spongepowered.common.event.damage.DamageEventHandler;
 import org.spongepowered.common.event.damage.MinecraftBlockDamageSource;
 import org.spongepowered.common.interfaces.block.IMixinBlock;
+import org.spongepowered.common.interfaces.data.IMixinActiveDataHolder;
 import org.spongepowered.common.interfaces.data.IMixinCustomDataHolder;
 import org.spongepowered.common.interfaces.entity.IMixinEntity;
 import org.spongepowered.common.interfaces.entity.IMixinGriefer;
@@ -144,7 +145,7 @@ import javax.annotation.Nullable;
 
 @Mixin(net.minecraft.entity.Entity.class)
 @Implements(@Interface(iface = Entity.class, prefix = "entity$"))
-public abstract class MixinEntity implements IMixinEntity {
+public abstract class MixinEntity implements IMixinEntity, IMixinActiveDataHolder {
 
     private static final String LAVA_DAMAGESOURCE_FIELD = "Lnet/minecraft/util/DamageSource;LAVA:Lnet/minecraft/util/DamageSource;";
     private static final String ATTACK_ENTITY_FROM_METHOD = "Lnet/minecraft/entity/Entity;attackEntityFrom(Lnet/minecraft/util/DamageSource;F)Z";
@@ -172,6 +173,7 @@ public abstract class MixinEntity implements IMixinEntity {
 	private SpongeProfileManager spongeProfileManager;
     @SuppressWarnings("unused")
 	private UserStorageService userStorageService;
+    private boolean alive;
     private Timing timing;
 
     @Shadow private UUID entityUniqueID;
@@ -1270,5 +1272,15 @@ public abstract class MixinEntity implements IMixinEntity {
     @Override
     public Value<Boolean> gravity() {
         return this.getValue(Keys.HAS_GRAVITY).get();
+    }
+
+    @Override
+    public boolean isActive() {
+        return this.alive;
+    }
+
+    @Override
+    public void setAlive(boolean alive) {
+        this.alive = alive;
     }
 }

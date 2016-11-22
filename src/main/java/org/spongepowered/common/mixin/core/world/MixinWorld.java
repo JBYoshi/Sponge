@@ -1298,6 +1298,16 @@ public abstract class MixinWorld implements World, IMixinWorld {
         this.theProfiler.endSection();
     }
 
+    @Inject(method = "onEntityAdded(Lnet/minecraft/entity/Entity;V", at = @At("HEAD"))
+    public void markEntityAlive(net.minecraft.entity.Entity entity, CallbackInfo ci) {
+        ((IMixinEntity) entity).setAlive(true);
+    }
+
+    @Inject(method = "onEntityRemoved(Lnet/minecraft/entity/Entity;V", at = @At("HEAD"))
+    public void markEntityDead(net.minecraft.entity.Entity entity, CallbackInfo ci) {
+        ((IMixinEntity) entity).setAlive(false);
+    }
+
     /**
      * @author blood - July 1st, 2016
      * @author gabizou - July 1st, 2016 - Update to 1.10 - Previous method was spliced between WorldClient and WorldServer.

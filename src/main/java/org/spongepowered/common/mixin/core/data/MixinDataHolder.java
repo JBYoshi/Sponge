@@ -51,13 +51,13 @@ import org.spongepowered.common.data.DataProcessor;
 import org.spongepowered.common.data.SpongeDataManager;
 import org.spongepowered.common.data.ValueProcessor;
 import org.spongepowered.common.entity.player.SpongeUser;
+import org.spongepowered.common.interfaces.data.IMixinActiveDataHolder;
 import org.spongepowered.common.interfaces.data.IMixinCustomDataHolder;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Mixin(value = {TileEntity.class, Entity.class, ItemStack.class, SpongeUser.class}, priority = 999)
@@ -161,7 +161,12 @@ public abstract class MixinDataHolder implements DataHolder {
         SpongeTimings.dataOfferKey.startTimingIfSync();
         final Optional<ValueProcessor<E, ? extends BaseValue<E>>> optional = SpongeDataManager.getInstance().getBaseValueProcessor(key);
         if (optional.isPresent()) {
-            final DataTransactionResult result = SpongeDataManager.getInstance().offer(this, key, value);
+            final DataTransactionResult result;
+            if (this instanceof IMixinActiveDataHolder && ((IMixinActiveDataHolder) this).isActive()) {
+                result = SpongeDataManager.getInstance().offer(this, key, value);
+            } else {
+                result = optional.get().removeFrom(this);
+            }
             SpongeTimings.dataOfferKey.stopTimingIfSync();
             TimingsManager.DATA_GROUP_HANDLER.stopTimingIfSync();
             return result;
@@ -183,15 +188,20 @@ public abstract class MixinDataHolder implements DataHolder {
         SpongeTimings.dataOfferManipulator.startTimingIfSync();
         final Optional<DataProcessor> optional = SpongeDataManager.getInstance().getWildDataProcessor(valueContainer.getClass());
         if (optional.isPresent()) {
-            final DataTransactionResult result = SpongeDataManager.getInstance().<DataManipulator<?, ?>>offer(this,
-                    (DataManipulator<?, ?>) optional.get().from(this).orElse(null), valueContainer, checkNotNull(function),
-                    m -> {
-                        if (m.isPresent()) {
-                            return optional.get().set(this, m.get(), MergeFunction.IGNORE_ALL);
-                        } else {
-                            return optional.get().remove(this);
-                        }
-                    });
+            final DataTransactionResult result;
+            if (this instanceof IMixinActiveDataHolder && ((IMixinActiveDataHolder) this).isActive()) {
+                result = SpongeDataManager.getInstance().<DataManipulator<?, ?>>offer(this,
+                        (DataManipulator<?, ?>) optional.get().from(this).orElse(null), valueContainer, checkNotNull(function),
+                        m -> {
+                            if (m.isPresent()) {
+                                return optional.get().set(this, m.get(), MergeFunction.IGNORE_ALL);
+                            } else {
+                                return optional.get().remove(this);
+                            }
+                        });
+            } else {
+                result = optional.get().set(this, valueContainer, function);
+            }
             SpongeTimings.dataOfferManipulator.stopTimingIfSync();
             TimingsManager.DATA_GROUP_HANDLER.stopTimingIfSync();
             return result;
@@ -248,14 +258,19 @@ public abstract class MixinDataHolder implements DataHolder {
         SpongeTimings.dataRemoveManipulator.startTimingIfSync();
         final Optional<DataProcessor> optional = SpongeDataManager.getInstance().getWildDataProcessor(containerClass);
         if (optional.isPresent()) {
-            final DataTransactionResult result = SpongeDataManager.getInstance().remove(this,
-                    (Class) containerClass, m -> {
-                        if (m.isPresent()) {
-                            return optional.get().set(this, (DataManipulator) m.get(), MergeFunction.IGNORE_ALL);
-                        } else {
-                            return optional.get().remove(this);
-                        }
-                    });
+            final DataTransactionResult result;
+            if (this instanceof IMixinActiveDataHolder && ((IMixinActiveDataHolder) this).isActive()) {
+                result = SpongeDataManager.getInstance().remove(this,
+                        (Class) containerClass, m -> {
+                            if (m.isPresent()) {
+                                return optional.get().set(this, (DataManipulator) m.get(), MergeFunction.IGNORE_ALL);
+                            } else {
+                                return optional.get().remove(this);
+                            }
+                        });
+            } else {
+                result = optional.get().remove(this);
+            }
             SpongeTimings.dataRemoveManipulator.stopTimingIfSync();
             TimingsManager.DATA_GROUP_HANDLER.stopTimingIfSync();
             return result;
@@ -276,7 +291,12 @@ public abstract class MixinDataHolder implements DataHolder {
         SpongeTimings.dataRemoveKey.startTimingIfSync();
         final Optional<ValueProcessor<?, ?>> optional = SpongeDataManager.getInstance().getWildValueProcessor(checkNotNull(key));
         if (optional.isPresent()) {
-            final DataTransactionResult result = SpongeDataManager.getInstance().remove(this, key);
+            final DataTransactionResult result;
+            if (this instanceof IMixinActiveDataHolder && ((IMixinActiveDataHolder) this).isActive()) {
+                result = SpongeDataManager.getInstance().remove(this, key);
+            } else {
+                result = optional.get().removeFrom(this);
+            }
             SpongeTimings.dataRemoveKey.stopTimingIfSync();
             TimingsManager.DATA_GROUP_HANDLER.stopTimingIfSync();
             return result;

@@ -133,6 +133,8 @@ public interface IMixinEntity extends org.spongepowered.api.entity.Entity {
 
     void createForgeCapabilities();
 
+    void setAlive(boolean alive);
+
     // Timings
     Timing getTimingsHandler();
 }

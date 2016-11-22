@@ -61,6 +61,7 @@ import org.spongepowered.common.data.util.DataQueries;
 import org.spongepowered.common.data.util.DataUtil;
 import org.spongepowered.common.data.util.NbtDataUtil;
 import org.spongepowered.common.interfaces.block.tile.IMixinTileEntity;
+import org.spongepowered.common.interfaces.data.IMixinActiveDataHolder;
 import org.spongepowered.common.interfaces.data.IMixinCustomDataHolder;
 import org.spongepowered.common.interfaces.world.IMixinWorldServer;
 import org.spongepowered.common.registry.type.block.TileEntityTypeRegistryModule;
@@ -72,7 +73,7 @@ import java.util.List;
 @NonnullByDefault
 @Mixin(net.minecraft.tileentity.TileEntity.class)
 @Implements(@Interface(iface = IMixinTileEntity.class, prefix = "tile$"))
-public abstract class MixinTileEntity implements TileEntity, IMixinTileEntity {
+public abstract class MixinTileEntity implements TileEntity, IMixinTileEntity, IMixinActiveDataHolder {
 
     private final TileEntityType tileType = SpongeImpl.getRegistry().getTranslated(this.getClass(), TileEntityType.class);
     // uses different name to not clash with SpongeForge
@@ -281,7 +282,12 @@ public abstract class MixinTileEntity implements TileEntity, IMixinTileEntity {
     }
 
     @Override
-    public  TileEntityArchetype createArchetype() {
+    public TileEntityArchetype createArchetype() {
         return new SpongeTileEntityArchetypeBuilder().tile(this).build();
+    }
+
+    @Override
+    public boolean isActive() {
+        return this.worldObj != null && (Object) this.worldObj.getTileEntity(this.pos) == this;
     }
 }

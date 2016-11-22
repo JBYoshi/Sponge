@@ -29,13 +29,17 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.google.common.collect.Lists;
 import net.minecraft.entity.Entity;
 import net.minecraft.tileentity.TileEntity;
+import org.spongepowered.api.data.DataHolder;
 import org.spongepowered.api.data.DataTransactionResult;
 import org.spongepowered.api.data.key.Key;
 import org.spongepowered.api.data.manipulator.DataManipulator;
+import org.spongepowered.api.data.manipulator.ImmutableDataManipulator;
 import org.spongepowered.api.data.merge.MergeFunction;
 import org.spongepowered.api.data.value.BaseValue;
 import org.spongepowered.api.data.value.mutable.Value;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.common.data.SpongeDataManager;
+import org.spongepowered.common.interfaces.data.IMixinActiveDataHolder;
 import org.spongepowered.common.interfaces.data.IMixinCustomDataHolder;
 
 import java.util.Iterator;
@@ -46,7 +50,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 @Mixin({TileEntity.class, Entity.class})
-public abstract class MixinCustomDataHolder implements IMixinCustomDataHolder {
+public abstract class MixinCustomDataHolder implements DataHolder, IMixinCustomDataHolder {
 
     private List<DataManipulator<?, ?>> manipulators = Lists.newArrayList();
 
@@ -60,16 +64,30 @@ public abstract class MixinCustomDataHolder implements IMixinCustomDataHolder {
                 break;
             }
         }
-        final DataTransactionResult.Builder builder = DataTransactionResult.builder();
-        final DataManipulator<?, ?> newManipulator = checkNotNull(function.merge(existingManipulator, (DataManipulator) manipulator.copy()));
-        if (existingManipulator != null) {
-            builder.replace(existingManipulator.getValues());
-            this.manipulators.remove(existingManipulator);
+        if (this instanceof IMixinActiveDataHolder && ((IMixinActiveDataHolder) this).isActive()) {
+            @Nullable final DataManipulator<?, ?> existingManipulator0 = existingManipulator;
+            return SpongeDataManager.getInstance().offer(this, existingManipulator, manipulator, function,
+                    o -> update(existingManipulator0, o.orElse(null)));
+        } else {
+            return update(existingManipulator, checkNotNull(function).merge(existingManipulator, manipulator));
         }
-        this.manipulators.add(newManipulator);
-        return builder.success(newManipulator.getValues())
-            .result(DataTransactionResult.Type.SUCCESS)
-            .build();
+    }
+
+    private DataTransactionResult update(@Nullable DataManipulator<?, ?> oldManipulator, @Nullable DataManipulator<?, ?> newManipulator) {
+        final DataTransactionResult.Builder builder = DataTransactionResult.builder();
+        if (oldManipulator != null) {
+            builder.replace(oldManipulator.getValues());
+            this.manipulators.remove(oldManipulator);
+            if (newManipulator == null) {
+                removeCustomFromNbt(oldManipulator);
+            }
+        }
+        if (newManipulator != null) {
+            builder.success(newManipulator.getValues());
+            this.manipulators.add(newManipulator);
+        }
+        return builder.result(DataTransactionResult.Type.SUCCESS)
+                .build();
     }
 
     @SuppressWarnings("unchecked")
@@ -83,6 +101,7 @@ public abstract class MixinCustomDataHolder implements IMixinCustomDataHolder {
         return Optional.empty();
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public DataTransactionResult removeCustom(Class<? extends DataManipulator<?, ?>> customClass) {
         @Nullable DataManipulator<?, ?> manipulator = null;
@@ -92,9 +111,14 @@ public abstract class MixinCustomDataHolder implements IMixinCustomDataHolder {
             }
         }
         if (manipulator != null) {
-            this.manipulators.remove(manipulator);
-            this.removeCustomFromNbt(manipulator);
-            return DataTransactionResult.builder().replace(manipulator.getValues()).result(DataTransactionResult.Type.SUCCESS).build();
+            if (this instanceof IMixinActiveDataHolder && ((IMixinActiveDataHolder) this).isActive()) {
+                @Nullable final DataManipulator<?, ?> manipulator0 = manipulator;
+                return SpongeDataManager.getInstance().remove(this, (Class) customClass, o -> {
+                    return update(manipulator0, (DataManipulator<?, ?>) o.orElse(null));
+                });
+            } else {
+                return update(manipulator, null);
+            }
         } else {
             return DataTransactionResult.failNoData();
         }
@@ -137,6 +161,9 @@ public abstract class MixinCustomDataHolder implements IMixinCustomDataHolder {
     @SuppressWarnings({"rawtypes", "unchecked"})
     @Override
     public <E> DataTransactionResult offerCustom(Key<? extends BaseValue<E>> key, E value) {
+        if (this instanceof IMixinActiveDataHolder && ((IMixinActiveDataHolder) this).isActive()) {
+            return SpongeDataManager.getInstance().offer(this, key, value);
+        }
         for (DataManipulator<?, ?> manipulator : this.manipulators) {
             if (manipulator.supports(key)) {
                 final DataTransactionResult.Builder builder = DataTransactionResult.builder();
@@ -149,19 +176,12 @@ public abstract class MixinCustomDataHolder implements IMixinCustomDataHolder {
         return DataTransactionResult.failNoData();
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public DataTransactionResult removeCustom(Key<?> key) {
-        final Iterator<DataManipulator<?, ?>> iterator = this.manipulators.iterator();
-        while (iterator.hasNext()) {
-            final DataManipulator<?, ?> manipulator = iterator.next();
-            if (manipulator.getKeys().size() == 1 && manipulator.supports(key)) {
-                iterator.remove();
-                removeCustomFromNbt(manipulator);
-                return DataTransactionResult.builder()
-                    .replace(manipulator.getValues())
-                    .result(DataTransactionResult.Type.SUCCESS)
-                    .build();
-            }
+        Optional manipulatorClass = SpongeDataManager.getInstance().getManipulatorClass(key);
+        if (manipulatorClass.isPresent()) {
+            return removeCustom((Class<? extends DataManipulator<?, ?>>) manipulatorClass.get());
         }
         return DataTransactionResult.failNoData();
     }
