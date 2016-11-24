@@ -573,8 +573,8 @@ public final class SpongeDataManager implements DataManager {
 
     public <M extends DataManipulator<?, ?>> DataTransactionResult offer(DataHolder dataHolder,
             @Nullable M original, M replace, MergeFunction merge, Function<Optional<M>, DataTransactionResult> applicator) {
-        return update(dataHolder, replace.asImmutable(), original == null ? null : original.asImmutable(), replace.asImmutable(),
-                applicator.compose(o -> o.map(i -> (M) i.asMutable())));
+        return this.<ImmutableDataManipulator<?, ?>>update(dataHolder, replace.asImmutable(), original == null ? null : original.asImmutable(), merge
+                .merge(original, replace).asImmutable(), applicator.compose(o -> o.map(i -> (M) i.asMutable())));
     }
 
     public <M extends DataManipulator<M, I>, I extends ImmutableDataManipulator<I, M>> DataTransactionResult remove(DataHolder dataHolder,
@@ -611,7 +611,7 @@ public final class SpongeDataManager implements DataManager {
     }
 
     @SuppressWarnings("unchecked")
-    private <M extends DataManipulator<M, I>, I extends ImmutableDataManipulator<I, M>> DataTransactionResult update(DataHolder dataHolder,
+    private <I extends ImmutableDataManipulator<?, ?>> DataTransactionResult update(DataHolder dataHolder,
             I either, @Nullable I original, @Nullable I replace, Function<Optional<I>, DataTransactionResult> applicator) {
         if (Objects.equals(original, replace)) {
             return DataTransactionResult.failResult(replace == null ? ImmutableSet.of() : replace.getValues());
@@ -626,15 +626,15 @@ public final class SpongeDataManager implements DataManager {
                 return applicator.apply(Optional.ofNullable(replace));
             }
             // Recursive event...? Try to protect the plugins.
-            ((ChangeDataHolderEvent<M, I>) map.get(key)).setModifiedData(replace);
+            ((ChangeDataHolderEvent) map.get(key)).setModifiedData(replace);
             return DataTransactionResult.successReplaceResult(original == null ? ImmutableSet.of() : original.getValues(), replace == null ?
                     ImmutableSet.of() : replace.getValues());
         }
-        ChangeDataHolderEvent<M, I> event = either.createChangeDataHolderEvent(dataHolder, original, replace);
+        ChangeDataHolderEvent<?, ?> event = ((ImmutableDataManipulator) either).createChangeDataHolderEvent(dataHolder, original, replace);
         map.put(key, event);
         try {
             Sponge.getEventManager().post(event);
-            replace = event.getModifiedData().orElse(null);
+            replace = (I) event.getModifiedData().orElse(null);
             if (Objects.equals(original, replace)) {
                 return DataTransactionResult.failResult(replace == null ? ImmutableSet.of() : replace.getValues());
             }
