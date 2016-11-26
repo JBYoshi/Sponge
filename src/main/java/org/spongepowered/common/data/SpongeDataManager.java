@@ -68,7 +68,6 @@ import org.spongepowered.common.data.util.ComparatorUtil;
 import org.spongepowered.common.data.util.DataFunction;
 import org.spongepowered.common.data.util.DataProcessorDelegate;
 import org.spongepowered.common.data.util.ValueProcessorDelegate;
-import org.spongepowered.common.interfaces.data.IMixinCustomDataHolder;
 import org.spongepowered.common.registry.type.data.DataTranslatorRegistryModule;
 
 import java.lang.reflect.Modifier;
