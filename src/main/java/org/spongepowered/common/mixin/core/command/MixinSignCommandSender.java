@@ -25,14 +25,15 @@
 package org.spongepowered.common.mixin.core.command;
 
 import net.minecraft.command.ICommandSender;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.tileentity.TileEntitySign;
 import org.spongepowered.api.block.tileentity.Sign;
 import org.spongepowered.api.command.CommandSource;
 import org.spongepowered.api.command.source.SignSource;
+import org.spongepowered.api.entity.living.player.Player;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.common.command.WrapperCommandSource;
 import org.spongepowered.common.interfaces.IMixinCommandSender;
 import org.spongepowered.common.interfaces.IMixinCommandSource;
 
@@ -42,6 +43,16 @@ public abstract class MixinSignCommandSender implements ICommandSender, IMixinCo
     @Shadow(aliases = {"this$0", "field_174795_a"})
     @Final
     private TileEntitySign field_174795_a;
+
+    /**
+     * If you get errors on this field when updating Minecraft, make sure you
+     * have the right target class; there are two inner classes in
+     * TileEntitySign that implement ICommandSender (last checked in 1.12), but
+     * only one has a player; that one should be the target.
+     */
+    @Shadow(aliases = {"playerIn", "field_174796_b"})
+    @Final
+    private EntityPlayerMP field_174796_b;
 
     @Override
     public ICommandSender asICommandSender() {
@@ -55,7 +66,7 @@ public abstract class MixinSignCommandSender implements ICommandSender, IMixinCo
 
     @Override
     public CommandSource getOriginalSource() {
-        return WrapperCommandSource.of(getCommandSenderEntity());
+        return (Player) this.field_174796_b;
     }
 
     @Override
